@@ -1,0 +1,56 @@
+name: Windows RDP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 9999
+
+    steps:
+      - name: Download Tailscale
+        run: |
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi" -OutFile "tailscale-setup.msi"
+          
+      - name: Install Tailscale
+        run: |
+          Start-Process msiexec.exe -Wait -ArgumentList '/i tailscale-setup.msi /quiet'
+          
+      - name: Connect to Tailscale
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_OAUTH_SECRET: ${{ secrets.TS_OAUTH_SECRET }}
+        run: |
+          $env:TS_API_CLIENT_ID = "${{ secrets.TS_OAUTH_CLIENT_ID }}"
+          $env:TS_API_CLIENT_SECRET = "${{ secrets.TS_OAUTH_SECRET }}"
+          $authKey = go run tailscale.com/cmd/get-authkey@latest -tags tag:ci
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey=$authKey
+          
+      - name: Enable RDP
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -name "UserAuthentication" -Value 1
+          
+      - name: Set RDP Password
+        run: |
+          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -AsPlainText "P@ssw0rd123!" -Force)
+          
+      - name: Get Connection Info
+        run: |
+          Write-Host "================================"
+          Write-Host "RDP Connection Details:"
+          Write-Host "================================"
+          $tailscaleIP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          Write-Host "Tailscale IP Address: $tailscaleIP"
+          Write-Host "Username: runneradmin"
+          Write-Host "Password: P@ssw0rd123!"
+          Write-Host "================================"
+          
+      - name: Keep Alive
+        run: |
+          while($true) {
+            Start-Sleep -Seconds 60
+          }
+          
